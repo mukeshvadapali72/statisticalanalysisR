@@ -1,0 +1,785 @@
+---
+title: "The statistical Analysis Report"
+author: "Mukesh M Vadapalli(C00246445)"
+date: "11 May 2020"
+output:
+  word_document: 
+    df_print: paged
+always_allow_html: yes
+toc: yes
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#install.packages('rcompanion')
+#install.packages('party')
+#install.packages('ROCR')
+#install.packages('psych')
+```
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(tidyr)
+library(MASS)
+library(plyr)
+library(psych)
+library(miscset)
+library(data.table)
+library(Hmisc)
+library(gridExtra)
+library(skimr)
+library(corrplot)
+library(dummies)
+library(caret)
+library(Boruta)
+library(pROC)
+library(forcats)
+library(ROCR) 
+```
+
+# Introduction
+
+Attrition refers to the loss of employees from the organization. In general, attrition is a voluntary process, which means it is the employee who decides to quit the company due to several factors. Due to attrition, the company may experience a loss in productivity if the employee is much familiar with that position. Attrition can lead to a reduction in workforce size and strength and also can increase the work pressure on remaining staff. It is costly from the business point of view for an organization to lose an employee who gained high skills and qualifications during his tenure and to train the new employee. So it important to know the different reasons that lead an employee to resign to avoid loss of talent.
+
+# Research Question*
+
+* 1- Can a statistical model be developed to predict if an employee is going to resign or not using supervised machine learning classification model?
+* 2- What are the important factors that lead to attrition in the company?
+
+**Reading csv file 'hranalytics.csv'**
+```{r}
+hr <- read.csv("hranalytics.csv")
+```
+
+**Top 10 rows**
+```{r}
+head(hr,10)
+```
+
+*Renaming Age column variable*
+```{r}
+colnames(hr)[colnames(hr) == 'ï..Age'] <- 'Age'
+```
+
+**Reading the column variable names**
+```{r}
+names(hr)
+```
+
+# Dataset
+Dataset consists of 1471 profiles of employees of a large company collected through an feedback survey. It includes 35 different factors that lead to attriation in the company.
+**Important variables of dataset**
+|- Attrition - Loss of staff from the company (yes- left the company no - still working )
+|- Department - Working departments in the company
+|- DistanceFromHome - distance between home and office (in miles)
+|- Business Travel - how often employee has to travel.
+|- Percent salary hike - salary hiked after promotions in the company. 
+|- HourlyRate - Per hour salary of employee.
+|- OverTime - Employee exceed their normally scheduled working hours
+|- EducationField - Staff education background
+|- EnvironmentStatisfication - Statisfaction of working environment from 1 to 4
+|- JobStatisfaction - Statisfaction from job 1 to 4
+|- JobInvolvement - How seriously employ works in an organization score 1 to 4
+|- JobLevel - Position/ level in an organization
+|- RelationshipSatisfaction  - relationships with other working staff score 1 to 4
+|- WorkLifeBalance  - Balance between work and life 
+
+
+**Display structure of hr dataset.**
+```{r}
+str(hr)
+```
+
+# Data preparation
+
+
+**Converting few columns datatype from int to factor as it has limited unique values. Factor datatype categorize the data and store it as levels**
+
+```{r}
+intcols <- c("Education","EnvironmentSatisfaction","JobInvolvement","JobLevel","JobSatisfaction","PerformanceRating","RelationshipSatisfaction","StockOptionLevel","WorkLifeBalance")
+hr[intcols] <- lapply(hr[intcols], factor)
+```
+
+
+**To get the overview of numerical and categorical features(skim function is used)**
+
+```{r}
+skim(hr)
+```
+
+*	There is 18 categorical and factor data type variable in the dataset whereas it has 17 columns of the numerical data type.
+*	There are no missing values in the data frame.
+*	The column name over 18 has only one value.
+
+
+*Duplicate value analysis*
+```{r}
+sum (is.na(duplicated(hr)))
+```
+
+# Data Analysis
+
+**Analysis of numerical variables in dataframe using histogram**
+plotting histogram of every numerical variable in the dataframe.
+```{r}
+multi.hist(hr[,sapply(hr, is.numeric)])
+```
+
+**As seen from the above numerical analysis**
+* Columns 'EmployeeCount' and 'Standardhours' have constant values and not changing so the standard deviation of that variable is zero.
+* Few of the numerical columns have heavy tail histogram i.e right-skewed. Heavy tail has a larger probability of getting large values as well as it tends to have outliers. Data transformation methods may be required to convert it into normal distribution before fitting model
+
+* Log transformtion
+```{r}
+dthr <- hr
+colsdt <- c("DistanceFromHome","MonthlyIncome","NumCompaniesWorked","YearsAtCompany","YearsSinceLastPromotion")
+dthr[colsdt] <- lapply(dthr[colsdt], log)
+```
+
+```{r}
+multi.hist(dthr[colsdt])
+```
+
+* Data transformation changes the values and even it doesn't much affect the accuracy in logistic regression as all column are still not converted into normal distribution. 
+
+**Dropping columns Employee count, Over18, StandardHours and Employee Number which are not much significant.**
+```{r}
+hr <- hr[,-c(9,10,22,27)]
+
+```
+
+**Analysis of categorical variables in dataframe**
+
+* Selecting only categorical values- grepl() function searchs for matches of a string or string vector.
+```{r}
+hr_categorical <- hr[,colnames(hr)[grepl('factor|logical|character',sapply(hr,class))]]
+                  
+```
+
+Attrition is the target variable and has two distinct values yes and no.
+```{r}
+
+fig <- plot_ly(hr, labels = ~Attrition, type = 'pie')
+fig <- fig %>% layout(title = 'Attrition in the company',marker = list(colors = colors,
+                      line = list(color = '#FFFFFF', width = 2)),
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
+fig
+```
+
+* Attrition class label has 1232 rows with 'No' values that is 84% and has 237 rows with 'Yes' values that is 16%. This is unbalance class label and this problem should be considered in some cases as unbalanced target variable will bias the prediction model towards the more comman class i.e 'NO'. But the standard attrition rate of any company is around 10-20% which in inline with our dataset (Glassdoor for Employers - Hiring Employees Made Easy, 2020).
+
+
+```{r}
+ggplotGrid(ncol = 2,
+  lapply(c("Education", "Department", "EducationField", "BusinessTravel","Gender","MaritalStatus"),
+    function(col) {
+        ggplot(hr_categorical, aes_string(col)) + geom_bar(tat = "identity", width = 0.5, color = "yellow",fill='black') + coord_flip() + theme_minimal()
+    }))
+```
+
+*	The large number of employees with ‘education level 3’ and very few with ‘education level 5’ works in the organization.
+*	Research & development has more staff.
+*	a large number of Staffs has life Science education background whereas very few are from human resource background.
+*	Very few employees travel frequently in the company where a large number of employees traveled rarely.
+*	The number of male staff is more as compared to the female staff.
+*	Married employees are more followed by Single and divorced.
+
+
+
+```{r}
+ggplotGrid(ncol = 2,
+  lapply(c("EnvironmentSatisfaction", "JobLevel", "JobRole", "JobSatisfaction","JobInvolvement","OverTime"),
+    function(col) {
+        ggplot(hr_categorical, aes_string(col)) + geom_bar(tat = "identity", width = 0.5, color = "yellow",fill='black') + coord_flip() + theme_minimal()
+    }))
+```
+
+*	Large number of employed scored 3 as environment satisfaction followed by 4, 2, and 1.
+*	Sales executive staffs are in more numbers compared to other job roles with the human resource at a minimum.
+*	From the Job satisfaction graph, it is seen clearly that almost more than three forth employees of an organization are satisfied with the job.
+*	Lots of employees marked job involvement score as 3 and very few as 1.
+*	Very few employees use to work overtime in the company.
+
+
+```{r}
+ggplotGrid(ncol = 2,
+  lapply(c("PerformanceRating", "RelationshipSatisfaction", "StockOptionLevel", "WorkLifeBalance"),
+    function(col) {
+        ggplot(hr_categorical, aes_string(col)) + geom_bar(tat = "identity", width = 0.5, color = "yellow",fill='black') + coord_flip() + theme_minimal()
+    }))
+```
+
+*	The majority of employees has scored 3 for performance rating followed by 4.
+*	For relationships with other employees most of the individual scores 4 and 3.
+*	For Worklifebalance majority of staff marked 3 followed by 2, 4 and 1.
+*	Stockoptionlevel is marked 0 and 1 by the majority of employees.
+
+
+# Exploratory Data Analysis
+
+**Analysis of few variables compared to target variable i.e Attrition**
+
+**Salary and Gender**
+```{r}
+ggplot(hr,aes(Gender,MonthlyIncome,fill=Gender))+geom_boxplot()+theme(legend.position="none",plot.title=element_text(hjust=0.5,size=10))+labs(x="Gender",y="Salary",title="Salary with Gender")
+```
+
+* Male has lower mean salary compared to female staff in the company.
+
+**Attrition by Department**
+```{r}
+hr %>%
+        group_by(Department, Attrition) %>%
+        tally() %>%
+        ggplot(aes(x = Department, y = n,fill=Attrition)) +
+        geom_bar(stat = "identity",width = 0.5, color = "black") +
+        theme_minimal()+
+        labs(x="Department", y="Number Attriation")+
+        ggtitle("Attrition according to the departent")
+
+
+```
+
+* 956 out of total employees works in research and development department.
+* 133 employees from research and development has left the company compared to 12 from human resource and 92 from sales department.
+
+
+**Age, Monthlyincome and Attrition**
+```{r}
+plot_ly(data = hr, x = ~Age, y = ~MonthlyIncome, color = ~Attrition,colors = "Set1")
+
+```
+<!-- As this graph plot is in  html format (plotly). After knitting to word file graph is not visual.  -->
+* As from the above graph it is seen that majority of employees who left the company has:
+* Monthly income less than 10k
+* Age below 40 years
+
+
+**Martial status, Age and Arttrition**
+```{r}
+ggplot(hr,aes(Age,MonthlyIncome,size=Age,col=factor(Attrition)))+geom_point(alpha=0.3)+theme_minimal()+labs(x="Age",y="MonthlyIncome",title="Attrition Level Comparision ",col="Attrition")+theme(legend.position="bottom",plot.title=element_text(size=14,hjust=0.6),plot.subtitle = element_text(size=10))+scale_color_brewer(palette="Set2")+facet_wrap(~MaritalStatus)
+
+```
+
+*	As age increases monthly income is increased this shows linear trend.
+*	It is seen that single workers are more prone to attrition in the company.
+*	Staff with divorced marital status have not attrited much.
+*	Married staff with a low monthly salary has more attrition.
+
+
+**JobRole, MonthlyIncone and Attrition**
+```{r}
+plot_ly(data = hr, x = ~JobRole, y = ~MonthlyIncome, color = ~Attrition,colors = "Set1")
+
+```
+<!-- As this graph plot is in  html format (plotly). After knitting to word file graph is not visual.  -->
+
+*	Employees with high salary groups have not attrited whereas low income in the same job role has higher attrition rate.
+*	Monthly income is correlated with the attrition rate.
+
+
+
+
+**JobSatisfaction and Attrition**
+```{r}
+hr %>%
+        ggplot(aes(x = JobSatisfaction, group = Attrition)) + 
+        geom_bar(aes(y = ..prop.., fill = factor(..x..)), 
+                 stat="count", 
+                 alpha = 0.7) +
+        geom_text(aes(label = scales::percent(..prop..), y = ..prop.. ), 
+                  stat= "count", 
+                  vjust = -.5) +
+        labs(y = "Percentage", fill= "MaritalStatus") +
+        facet_grid(~Attrition) +
+        theme_minimal()+
+        theme(legend.position = "none", plot.title = element_text(hjust = 0.5)) + 
+        ggtitle("Attrition")
+
+```
+
+* 18.09% of employees has not resigned their job who are least satisfied with they job whereas 33 % of currently working employees are highly satisfied.
+* Approximately 28% of employees attrited has scored least wheras 22% are highly satisfied from the job has attrited.
+
+
+**OverTime and Attrition**
+```{r}
+hr %>%
+        ggplot(aes(x = OverTime, group = Attrition)) + 
+        geom_bar(aes(y = ..prop.., fill = factor(..x..)), 
+                 stat="count", 
+                 alpha = 0.7) +
+        geom_text(aes(label = scales::percent(..prop..), y = ..prop.. ), 
+                  stat= "count", 
+                  vjust = -.5) +
+        labs(y = "Percentage", fill= "MaritalStatus") +
+        facet_grid(~Attrition) +
+        theme_minimal()+
+        theme(legend.position = "none", plot.title = element_text(hjust = 0.5)) + 
+        ggtitle("Attrition")
+```
+
+*	According to the graph, Staff who left has worked overtime i.e 53.6% compared to employees stayed in the company i.e 23.4%.
+*	Working overtime can be one of the main reasons for attrition.
+
+
+# outlier analysis
+```{r}
+outliers <- function(x){
+    
+    q1 <- quantile(x,.25)
+    q3 <- quantile(x,.75)
+    IQR <- q3- q1
+    low_bound <- q1 - 1.5*IQR
+    high_bound <- q3 + 1.5*IQR
+    outlier_low <- subset(x, x<low_bound)
+    outlier_high <- subset(x, x>high_bound)
+    
+    return(c(outlier_low, outlier_high))
+}
+```
+
+```{r}
+hrout  <- hr[,sapply(hr, is.numeric)]
+```
+
+
+**Applying outlier function to the dataframe**
+```{r}
+lapply(hrout,outliers)
+```
+
+* Columns that has high outliers are MonthlyIncome, TotalWorkingYears, TrainingTimesLastYear,YearsAtCompany,YearsSinceLastPromotion and YearsInCurrentRole.
+
+**Analysing outlier variables using boxplot** 
+```{r}
+ggplotGrid(ncol = 2,
+  lapply(c("MonthlyIncome", "TotalWorkingYears", "TrainingTimesLastYear","YearsAtCompany","YearsSinceLastPromotion","YearsInCurrentRole"),
+    function(col) {
+        ggplot(hrout, aes_string(col)) + geom_boxplot() + theme_minimal()
+    }))
+```
+
+* As seen from the plot YearAtCompany column has high outlier compared to other variables.
+* This outlier column cannot be dropped, as these columns are significant variables for target variable. 
+
+
+
+
+# Correlation analysis
+
+**converting hr1 data frame as integer**
+```{r}
+hr1 <- hr
+hr1[] <- lapply(hr1,as.integer)
+```
+
+
+**Correlation Plot**
+```{r, fig.width = 23}
+
+corrplot(cor(hr1),method="pie")
+```
+
+*	From the above correlation plot
+*	Age variable is highly correlated with TotalWorkingYears followed by monthly income and Job level.
+*	Higher Joblevels higher monthly income (both are positively correlated)
+*	The strong correlation between yearsatcompany and yearswithcurrent manager that staff doesn’t change their jobroles or managers.
+*	High performance rating is highly correlated with percentinsalaryhike which is obvious.
+*	Monthly Income is highly correlated Joblevel as higher job levels more is the monthly salary.
+*	Yearincurrentrole is correlated with yearatcompany means staff who love their role are stay for a longer time.
+*	Monthly income and job level are highly correlated and one of the variables needs to be dropped.
+
+
+**According to cor-relation analysis variables that are correlated with attrition are**
+
+* Attrition target variable is correlated to Age, Joblevel, Montyhly Income, Totalworkingyears and yearswithcurrent manager.
+
+# Feature Engineering.
+
+```{r}
+hrpr <- hr
+```
+
+**Converting Categorical values of attrition that is 'yes' and 'NO' to 1 and 0 respectively**
+```{r}
+hrpr<-hrpr %>% mutate(Attrition=factor(Attrition)) %>% mutate(Attrition=fct_recode(Attrition,"0"="No","1"="Yes"))
+
+```
+
+**As dataset has few columns with unique categorical variables using dummy function each level of the categorical variable is varied to a specified reference level**
+```{r}
+hrpr <- dummy.data.frame(hrpr, sep = "_")
+```
+
+
+## Multicollinearity Analysis
+**Alias are linearly dependent variables and cause multicollinearity** 
+
+Checking alias variable in the dataset hrpr using linear model function.
+```{r}
+aliascheck <- alias(lm(Attrition_0 ~., data = hrpr))
+```
+
+
+**Dropping alias variables**
+```{r}
+hrpr<-hrpr[,-c(3,6,10,16,22,26,28,33,38,47,51,54,59,62,66,70,76)]
+```
+
+
+**vif(variation inflation factor)**
+VIF is used to assess multicollinearity. VIF measures how much the variance of the regression coefficients are inflated by multicollinearity in the model (Essentials, 2020).
+```{r}
+vif_output <- lm(Attrition_0 ~., data = hrpr)
+vif_res <- car::vif(vif_output)
+summary(vif_res)
+print(vif_res)
+```
+
+* Multicollinearity occurs when factors are highly correlated with each other.
+* It increases the variance of co-efficient estimates and makes the estimates prone to minor changes in the model.
+* Vif values greater than 10 indicates that extreme multicollinearity is present in the data whereas values between 2 -10 it is highly correlated. 
+* For this dataset vif value less than 2 will be considered (Burke, 2020).
+
+```{r}
+vif_res > 2
+```
+
+
+**Features column with vif values greater than 2 are dropped** 
+```{r}
+hrpr<-hrpr[,c(1,2,3,4,5,8,9,10,12,13,15,16,17,18,19,20,21,22,23,24,27,28,29,30,31,32,33,34,35,38,39,40,41,44,45,46,45,48,49,50,51,53,54,56,57,58,62,63)] 
+```
+```{r}
+ hrpr <-hrpr[ , -which(names(hrpr) %in% c("NumCompaniesWorked.1"))]
+```
+
+# Modelling Logistic Regession 
+
+*Logistic regression- Logistic regression is a statistical technique, which uses a logistic function in its basic form to predict a binary or more dependent variables (Logistic regression, 2020).
+
+**Spliting the data to train and test data and classified as modeldata and validation data respectively**
+```{r}
+set.seed(2017)
+train <- sample(1:nrow(hrpr), nrow(hrpr)*.7)
+test = -train
+
+modeldata <- hrpr[train,]
+validationdata <- hrpr[test,]
+```
+
+
+##Single variable
+##Model Fitting using glm(Generalized Linear Models) to logistic regression.
+
+**Response Variable considered is Attrition_0**
+* 1 in Attrition_0 means staff has not attrited i.e 'No'.
+* 0 in Attrition_0 means staff has attrited i.e 'Yes'.
+```{r}
+logmodelaa <- glm(Attrition_0 ~ Age, family=binomial(link="logit"), data = modeldata)
+print(summary(logmodelaa))
+```
+
+
+*	Null deviance indicates how well the dependent variable is predicted by a model that includes the grand mean(intercept).
+*	The model fitted well as residual deviance reduced by 30 with loss of 1 degree of freedom.
+*	Degree of freedom represents the number of independent variables
+*	Fisher scoring indicates how quickly the glm function converged on the maximum likelihood estimates for the coefficient.
+
+
+## Prediction 
+```{r}
+
+results <- predict(logmodelaa,newdata=validationdata,type='response')
+results <- ifelse(results>=0.5,1,0)
+print("confusion matrix for Logistic Regression")
+table(Actual_value = validationdata$Attrition_0,Predicted_value = results > 0.5)
+```
+**Omiting if any null value is present**
+```{r}
+validationdata <- validationdata[complete.cases(validationdata),]
+data12 = na.omit(validationdata)
+```
+
+```{r}
+results <- factor(results)
+data12$Attrition_0 <- factor(data12$Attrition_0)
+```
+
+
+**Confusion Matrix for single dependent and independent variables**
+```{r}
+confusionMatrix(results,data12$Attrition_0,mode = "sens_spec")
+```
+
+* Sensitivity is the proportion of successful variables that are categorized correctly(true positive rate)
+* specificity is the proportion of unsuccessful variables that are categorized correctly(true negative rate)(Sensitivity and specificity, 2020).
+* Kappa -Is a statistic value used to measure inter-rater reliability.
+* Accuracy - 83.45%
+* p-value less than 0.05
+
+
+## Logistic regression for multiple independent variable and single dependent variable - model 1
+
+* fitting the model
+```{r}
+logmodel <- glm(Attrition_0 ~., family=binomial(link="logit"), data = modeldata)
+print(summary(logmodel))
+```
+
+* Model fitted well as residual deviance reduced by 339 with loss of 46 degree of freedom.
+* Stars next to variables represent that how well it is explained and has a p-value less than 0.05.
+
+**Calculating Rsquare value**
+Rsquare value is a statistical measure that indicates how well the variance of response variable is explained by independent variables.
+```{r}
+library(rcompanion)
+nagelkerke(logmodel)
+```
+
+* positive pseudo r square value '0.480'
+* positive value indicates as the predictor variables increases, then the likelihood of the event occurring also increases.
+
+## Predicting 
+```{r}
+log_pred <- predict(logmodel,newdata=validationdata,na.action = na.pass)
+log_pred <- ifelse(log_pred>=0.5,1,0)
+print("confusion matrix for Logistic Regression")
+table(Actual_value = validationdata$Attrition_0,Predicted_value = log_pred > 0.5)
+```
+
+
+```{r}
+validationdata <- validationdata[complete.cases(validationdata),]
+data12 = na.omit(validationdata)
+```
+
+```{r}
+log_pred <- factor(log_pred)
+data12$Attrition_0 <- factor(data12$Attrition_0)
+```
+
+```{r}
+confusionMatrix(log_pred,data12$Attrition_0)
+```
+
+* Accuracy measured is- 87.7%
+* P-value is very less than alpha value(0.05) all the values are significant in logistic regression model.
+
+# Prediction with high significant values 3 star - model 2
+
+In this, columns which are highly significant from the previous fit model are considered. 
+```{r}
+logmodelsig <- glm(Attrition_0 ~ Age+BusinessTravel_Travel_Frequently+DistanceFromHome+EnvironmentSatisfaction_1+JobInvolvement_1+JobLevel_2+JobSatisfaction_1+NumCompaniesWorked+OverTime_No+RelationshipSatisfaction_1+StockOptionLevel_1+YearsSinceLastPromotion+YearsWithCurrManager, family=binomial(link="logit"), data = modeldata)
+print(summary(logmodelsig))
+```
+
+* Model fitted well as residual deviance reduced by 248 with loss of 13 degrees of freedom
+
+**Calculating Rsquare value**
+```{r}
+nagelkerke(logmodelsig)
+```
+
+* Positive Rsuared value = 0.36
+* Pseudo Rsquared value is less as compared to model 1.
+
+```{r}
+log_predsig <- predict(logmodelsig,newdata=validationdata,na.action = na.pass)
+log_predsig <- ifelse(log_predsig>=0.5,1,0)
+
+```
+
+```{r}
+log_predsig <- factor(log_predsig)
+```
+
+
+```{r}
+confusionMatrix(log_predsig,data12$Attrition_0)
+```
+
+* Accuracy = 85.7%
+* p-value is higher than alpha value.
+* Sensitivity is very low compared to model 1 and vice versa for specificity.
+
+
+
+## Annova - model 3 
+
+**Analysis of variance is used to analyze the differences among the group means in the sample data.**
+**Chisq is used when we have two categorical variables and determines one variable is related to another** (ANOVA, Regression, and Chi-Square | Educational Research Basics by Del Siegle, 2020) 
+```{r}
+anova(logmodel, test = "Chisq")
+```
+
+
+### Considering only significant values of annova output.
+```{r}
+logmodelannova <- glm(Attrition_0 ~ Age+BusinessTravel_Travel_Frequently+EnvironmentSatisfaction_1+JobInvolvement_1+JobLevel_2+NumCompaniesWorked+OverTime_No+RelationshipSatisfaction_1+StockOptionLevel_1+YearsWithCurrManager, family=binomial(link="logit"), data = modeldata)
+print(summary(logmodelannova))
+```
+
+* Model fitted well as residual deviance reduced by 218 with loss of 10 degrees of freedom
+
+**Calculating Rsquare value**
+```{r}
+nagelkerke(logmodelannova)
+```
+
+* Pseudo Rsquare value = 0.326
+* Pseudo Rsquare value is less than compared to model 1 and model 2.
+
+```{r}
+log_predannova <- predict(logmodelannova,newdata=validationdata,na.action = na.pass)
+log_predannova <- ifelse(log_predannova>=0.5,1,0)
+print("confusion matrix for Logistic Regression")
+table(Actual_value = validationdata$Attrition_0,Predicted_value = log_predannova > 0.5)
+misClasificError1 <- mean(log_predannova != validationdata$Attrition_0)
+print(paste('Logistic Regression Accuracy',1-misClasificError1))
+```
+
+```{r}
+log_predannova <- factor(log_predannova)
+```
+
+```{r}
+caret::confusionMatrix(log_predannova,data12$Attrition_0)
+```
+
+* Accuracy is 85.94%
+* p-value is greater than alpha value.
+
+**As from the analysis of 3 different models, model 1 gave higher accuracy (87.7%).**
+
+* Considering only significant values compared to target variable does not effect the accuracy and decreased by 2%.
+* Applying logistic regression to the significant variables from Annova analysis also reduced the accuracy.
+* As it seen from the summary table of 3 models p-value is smaller than the significance alpha value only in model 1.
+* Results - Prediction using only significant values to the response variable does not affect the model accuracy for this dataset.
+
+
+##Checking the important variables with respect to target variable Attrition_0.
+
+ImpVar function ranks the variable by importance as coefficients of variables are standardized to a two standard deviation change of variable.(rdrr,2020)
+```{r}
+impvar <- varImp(logmodel, scale = FALSE)
+
+apply(impvar,1,sort,decreasing=FALSE)
+```
+
+**According to varImp function top 5 Significant factors that effects the Attrition rate are**
+* OverTime_No
+* StockOptionLevel_1
+* BusinessTravel_Travel_Frequently
+* NumCompaniesWorked
+* JobSatisfaction_1
+
+
+## Ploting ROC,precision,recall and AUC curve 
+ROC is a probability curve and AUC is degree or measure of separability.
+Higher the AUC better is the model
+AUC tells how much the model is capable of distinguishing between classes.
+To predict the probability of a binary outcome is Receiver Operating Characteristic curve.
+```{r}
+res <- predict(logmodel, modeldata, type = "response")
+ROCRPred <- prediction(res, modeldata$Attrition_0  )
+ROCRPerf <- performance(ROCRPred,"tpr","fpr")
+plot(ROCRPerf,colorize = TRUE, print.cutoffs.at = seq(0.1, by = 0.1))
+```
+
+##Changing the threshold value to 0.3
+```{r}
+results <- predict(logmodel,newdata=validationdata,type='response')
+results <- ifelse(results>=0.3,1,0)
+print("confusion matrix for Logistic Regression")
+table(Actual_value = validationdata$Attrition_0,Predicted_value = results > 0.2)
+misClasificError1 <- mean(results != validationdata$Attrition_0)
+print(paste('Logistic Regression Accuracy',1-misClasificError1))
+```
+
+* Changing the threshold values from the roc curve to 0.3 gave the accuracy approximately equal to model 1 with threshold value 0.5
+
+
+# Plotting AUC Curve
+Auc function considers both the true outcomes from the validation data but predicts the probabilites for only 1 class
+```{r}
+
+rf.Plot<- plot.roc(as.numeric(validationdata$Attrition_0), as.numeric(log_pred),lwd=2, type="b", print.auc=TRUE,col ="blue")
+
+```
+
+* AUC is 0.76, that means 76.2% has a chance to distinguish between yes or No attrition.
+* It performed well even we have variable Attrition_0 with imbalance class.
+
+**Precision vs recall is useful to plot when we have binary classification problems with imbalance value in the response column **
+```{r}
+RP.perf <- performance(ROCRPred, "prec", "rec")
+plot (RP.perf)
+```
+
+**F1- score is weighted average of Precision and Recall**
+```{r}
+f1score <-  performance(ROCRPred,"f")
+plot(f1score)
+```
+
+
+
+
+# Plotting the probabilities of attrition values from logmodel.
+
+```{r}
+predicted_data <- data.frame(probability.attri = logmodel$fitted.values, attr=modeldata$Attrition_0)
+
+predicted_data <- predicted_data[order(predicted_data$probability.attri, decreasing = FALSE),]
+predicted_data$rank <- 1:nrow(predicted_data)
+```
+
+```{r}
+ggplot(data= predicted_data, aes(x=rank, y=probability.attri))+geom_point(aes(color=factor(attr)),alpha=1,shape=4,stroke=2)+xlab("Index")+ylab("Predicted probability of Attrition")
+```
+
+**As attrition_0 is considered that is 1 represents - No attrition and 0 represents Attrition**
+
+* Graphs shows that there is very high probability of not attriting from the company and low probability of attrition from the over all data.
+
+
+
+# Conclusion
+*	1- Can a statistical model be developed to predict if an employee is going to resign or not using a supervised machine learning classification model?
+*	Yes, a logistic regression model can be developed to predict whether the employees will resign or not with the accuracy of 88% even with the imbalance class values.
+*	2- What are the important factors that lead to attrition in the company? According to the EDA performed:
+*	There is more attrition from the research and development department in the company.
+*	Lower Monthly income leads to attrition. Younger staffs tend to attrited more.
+*	Employees working overtime has more attrition rate.
+*	Jobsatisfaction scores also influence the attrition rate. According to the correlation analysis(statistical features)
+*	Attrition variable is correlated to Age, Joblevel, Montyhly Income, Totalworkingyears. According to varImp function of logmodel
+*	varimp means variables that are highly significant to attrition are:
+*	OverTime_No, StockOptionLevel_1, BusinessTravel_Travel_Frequently, NumCompaniesWorked, JobSatisfaction_1
+*	In summary, Factors that influence more to attrition from the company are working overtime, salary, Age, staff who travels frequently, and job satisfaction.
+*	These factors need to be considered by HR of the company to avoid the attrition of the employee as it becomes costly for an organization to hire new talents and train them.
+
+
+# Limitations and further work
+*	Analysis of the data can be further improved by doing feature engineering such as grouping the age column to young, mid and older staff, clubbing satisfaction variables.
+*	Accuracy of the model can be improved by removing columns with outlier values and in-depth feature selection.
+*	Transforming data into a normal distribution.
+
+
+
+# Reference
+2020[online] Available at: <https://rdrr.io/github/fzettelmeyer/mktg482/man/varimp.logistic.html)> [Accessed 11 May 2020].
+Researchbasics.education.uconn.edu. 2020. ANOVA, Regression, And Chi-Square | Educational Research Basics By Del Siegle. [online] Available at: <https://researchbasics.education.uconn.edu/anova_regression_and_chi-square/> [Accessed 11 May 2020].
+Burke, S., 2020. Model Building Process Part 2: Factor Assumptions. [online] Available at: <https://www.afit.edu/stat/statcoe_files/Model%20Building%20Process%20Part%202%20Factor%20Assumptions.pdf> [Accessed 17 July 2018].
+Essentials, L., 2020. Linear Regression Assumptions And Diagnostics In R: Essentials - Articles - STHDA. [online] Sthda.com. Available at: <http://www.sthda.com/english/articles/39-regression-model-diagnostics/161-linear-regression-assumptions-and-diagnostics-in-r-essentials/> [Accessed 11 May 2020].
+US | Glassdoor for Employers. 2020. Glassdoor For Employers - Hiring Employees Made Easy. [online] Available at: <https://www.glassdoor.com/employers/> [Accessed 11 May 2020].
+En.wikipedia.org. 2020. Logistic Regression. [online] Available at: <https://en.wikipedia.org/wiki/Logistic_regression> [Accessed 11 May 2020].
+En.wikipedia.org. 2020. Sensitivity And Specificity. [online] Available at: <https://en.wikipedia.org/wiki/Sensitivity_and_specificity> [Accessed 11 May 2020].
+
